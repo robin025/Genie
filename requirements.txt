@@ -1,0 +1,7 @@
+diffusers
+transformers
+accelerate
+scipy
+triton
+ftfy
+gradio 
