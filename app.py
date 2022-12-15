@@ -404,7 +404,7 @@ with gr.Blocks(css=css) as demo:
 
           with gr.Group():
             neg_prompt = gr.Textbox(label="Negative prompt", placeholder="What to exclude from the image")
-            choose_scheduler =  gr.Dropdown(["DPMS","EADS","LMSD","DDIM","EDS","PNMS","DDPM"])
+            choose_scheduler =  gr.Dropdown(["DPMS","EADS","LMSD","DDIM","EDS","PNMS","DDPM"],label="Scheduler",value="DPMS")
 
 
             n_images = gr.Slider(label="Number of images", value=1, minimum=1, maximum=10, step=1)
