@@ -4,6 +4,14 @@ import torch
 from PIL import Image
 import random
 
+# Importing Libraries, Pipelines and Schedulers
+
+from diffusers import StableDiffusionPipeline, StableDiffusionImg2ImgPipeline, StableDiffusionUpscalePipeline, DiffusionPipeline, DPMSolverMultistepScheduler,LMSDiscreteScheduler,DDIMScheduler,EulerDiscreteScheduler,PNDMScheduler,DDPMScheduler,EulerAncestralDiscreteScheduler
+import gradio as gr
+import torch
+from PIL import Image
+import random
+
 state = None
 current_steps = 50
 
@@ -32,8 +40,8 @@ scheduler_types={
 # Creating Simple Customized pipeline
 pipe = StableDiffusionPipeline.from_pretrained(
       model_id,
-      revision="fp16",
-      torch_dtype=torch.float16,
+      revision="fp16" if torch.cuda.is_available() else "fp32",
+      torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
       scheduler=DPMS
     ).to("cuda")
 pipe.enable_attention_slicing()
@@ -52,7 +60,7 @@ modes = {
     'img2img': 'Image to Image',
     'inpaint': 'Inpainting',
     'upscale4x': 'Upscale',
-    'VideoGen':"Generation of Video"
+    'VideoGen':"Generation of Video (TODO)"
 }
 
 
@@ -78,7 +86,10 @@ def set_mem_optimizations(pipe):
     else:
       pipe.disable_attention_slicing()
     
-
+    # if mem_eff_attn_enabled:
+    #   pipe.enable_xformers_memory_efficient_attention()
+    # else:
+    #   pipe.disable_xformers_memory_efficient_attention()
 
 
 ###############################################################################
@@ -88,7 +99,7 @@ def get_i2i_pipe(scheduler):
     update_state("Loading image to image model...")
 
     pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
-      model_id,
+      "CompVis/stable-diffusion-v1-4",
       revision="fp16" if torch.cuda.is_available() else "fp32",
       torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
       scheduler=scheduler
@@ -271,6 +282,12 @@ def inpaint(prompt, n_images, neg_prompt, img, guidance, steps, width, height, g
     mask = img['mask']
     inp_img = square_padding(inp_img)
     mask = square_padding(mask)
+
+    # # ratio = min(height / inp_img.height, width / inp_img.width)
+    # ratio = min(512 / inp_img.height, 512 / inp_img.width)
+    # inp_img = inp_img.resize((int(inp_img.width * ratio), int(inp_img.height * ratio)), Image.LANCZOS)
+    # mask = mask.resize((int(mask.width * ratio), int(mask.height * ratio)), Image.LANCZOS)
+
     inp_img = inp_img.resize((512, 512))
     mask = mask.resize((512, 512))
 
@@ -282,6 +299,8 @@ def inpaint(prompt, n_images, neg_prompt, img, guidance, steps, width, height, g
       negative_prompt = neg_prompt,
       num_inference_steps = int(steps),
       guidance_scale = guidance,
+      # width = width,
+      # height = height,
       generator = generator,
       callback=pipe_callback).images
         
@@ -363,6 +382,7 @@ def upscale_tiling(prompt, neg_prompt, img, guidance, steps, generator):
             generator=generator,
         ).images
 
+
 # Mode Change
 def on_mode_change(mode):
   return gr.update(visible = mode in (modes['img2img'], modes['inpaint'], modes['upscale4x'])), \
@@ -391,7 +411,7 @@ with gr.Blocks(css=css) as demo:
     
     with gr.Row(elem_id='main-div'):
       with gr.Column(scale=100):
-          inf_mode = gr.Radio(label="Modes", choices=list(modes.values())[:4], value=modes['txt2img']) # TODO remove [:3] limit
+          inf_mode = gr.Radio(label="Modes", choices=list(modes.values())[:4], value=modes['txt2img']) 
           
           with gr.Group(visible=False) as i2i_options:
             image = gr.Image(label="Image", height=128, type="pil", tool='sketch')
@@ -399,12 +419,12 @@ with gr.Blocks(css=css) as demo:
             upscale_info = gr.Markdown("""Best for small images (128x128 or smaller).
                                         Bigger images will be sliced into 128x128 tiles which will be upscaled individually.
                                         This is done to avoid running out of GPU memory.""", visible=False)
-            videogen_info = gr.Markdown(""" Video Generation : TODO """)
+            videogen_info = gr.Markdown(""" Video Generation """)
             strength = gr.Slider(label="Transformation strength", minimum=0, maximum=1, step=0.01, value=0.5)
 
           with gr.Group():
             neg_prompt = gr.Textbox(label="Negative prompt", placeholder="What to exclude from the image")
-            choose_scheduler =  gr.Dropdown(["DPMS","EADS","LMSD","DDIM","EDS","PNMS","DDPM"],label="Scheduler",value="DPMS")
+            choose_scheduler =  gr.Dropdown(["DPMS","EADS","LMSD","DDIM","EDS","PNMS","DDPM"],label="Schedulers", value="DPMS")
 
 
             n_images = gr.Slider(label="Number of images", value=1, minimum=1, maximum=10, step=1)
@@ -433,7 +453,8 @@ with gr.Blocks(css=css) as demo:
       with gr.Column(scale=100):
         seed = gr.Slider(0, 2147483647, label='Seed', value=456785, step=1)
         with gr.Accordion("Memory optimization"):
-                attn_slicing = gr.Checkbox(label="Attention slicing", value=attn_slicing_enabled)
+                attn_slicing = gr.Checkbox(label="Attention slicing (a bit slower, but uses less memory)", value=attn_slicing_enabled)
+              # mem_eff_attn = gr.Checkbox(label="Memory efficient attention (xformers)", value=mem_eff_attn_enabled)
             
         
         
@@ -442,6 +463,7 @@ with gr.Blocks(css=css) as demo:
     inf_mode.change(on_mode_change, inputs=[inf_mode], outputs=[i2i_options, inpaint_info, upscale_info, strength], queue=False)
     steps.change(on_steps_change, inputs=[steps], outputs=[], queue=False)
     attn_slicing.change(lambda x: switch_attention_slicing(x), inputs=[attn_slicing], queue=False)
+    # mem_eff_attn.change(lambda x: switch_mem_eff_attn(x), inputs=[mem_eff_attn], queue=False)
 
     inputs = [inf_mode, prompt, n_images, guidance, steps, width, height, seed, image, strength, neg_prompt,choose_scheduler]
     outputs = [gallery, error_output]
